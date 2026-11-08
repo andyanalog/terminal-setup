@@ -3,6 +3,8 @@
 Omarchy-style terminal on Windows, Linux and macOS: Tokyo Night colors, CaskaydiaMono Nerd Font,
 Starship prompt, Linux-style commands, lazygit, lazydocker and LazyVim.
 
+![Demo: fastfetch, ls/ll/lt, cat and grep, LazyVim and lazygit in a Tokyo Night terminal](demo.gif)
+
 | System | Run | Then |
 |---|---|---|
 | Windows | `powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1` | Reopen Windows Terminal |
