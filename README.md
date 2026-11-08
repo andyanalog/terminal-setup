@@ -31,6 +31,23 @@ On Windows, `grep`, `rm -rf`, `touch`, `head`, `tail`, `mkdir -p`, `which`, `exp
 - Normal line numbers (not relative): `lua/config/options.lua`
 - No autocomplete popup in `.txt` / Markdown: `lua/plugins/completion.lua`
 
+## Security
+
+Nothing is downloaded and run blindly. Every download is either verified by a package manager or pinned to an exact version and checked against a SHA-256 hash written in the script. If a hash doesn't match, the script stops before using the file.
+
+| Source | How it's verified |
+|---|---|
+| winget (Windows) | winget checks each installer's SHA-256 from its manifest |
+| apt / dnf / pacman (Linux) | Packages are GPG-signed by the distro |
+| Homebrew (macOS) | Homebrew checks SHA-256 for every package |
+| Homebrew itself (macOS) | Pinned `Homebrew.pkg` + SHA-256 + Apple Developer ID signature check |
+| GitHub release files (font, tree-sitter, and Linux fallbacks: starship, zoxide, eza, fastfetch, lazygit, lazydocker, neovim) | Pinned version + SHA-256, cross-checked against each project's own checksum files |
+| LazyVim | Starter pinned to a commit; plugins pinned with `lazy-lock.json` |
+
+The pins live at the top of each script. To update a tool, change its URL and hash (GitHub shows each file's sha256 on its release page).
+
+Scripts never ask for or store passwords. `sudo` is only used on Linux to run the package manager, and only when something is missing. On macOS it's only used to install the signed Homebrew package.
+
 ## Where the configs live
 | | Windows | Linux / macOS |
 |---|---|---|

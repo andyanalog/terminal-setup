@@ -22,32 +22,66 @@ export PATH="$BIN:$PATH"
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 IS_WSL=false; grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=true
 
+# ─────────────────────────────────────────────────────────────
+#  Pinned downloads: exact versions + SHA-256 fingerprints.
+#  Every file is checked before it is used; a mismatch stops the script.
+#  Hashes were cross-checked against each project's own checksum files.
+#  To update a tool: change its URL and hash (GitHub shows each file's
+#  sha256 on the release page).
+# ─────────────────────────────────────────────────────────────
+GH=https://github.com
+declare -A URL SHA
+pin() { URL[$1]="$2"; SHA[$1]="$3"; }
+
 case "$(uname -m)" in
-  x86_64|amd64)  ARCH_RE='(x86_64|amd64|x64)' ;;
-  aarch64|arm64) ARCH_RE='(arm64|aarch64)' ;;
+  x86_64|amd64)
+    pin starship   $GH/starship/starship/releases/download/v1.27.0/starship-x86_64-unknown-linux-musl.tar.gz 10c8eb4cb3b761d9bf59ea828444c2dab36c900b7d69a69e08814b286969df89
+    pin zoxide     $GH/ajeetdsouza/zoxide/releases/download/v0.10.0/zoxide-0.10.0-x86_64-unknown-linux-musl.tar.gz 2d93385b99f3e82cf2701609a1bffcad863fbeb75aa3fe7eb6be4d29be68b1ae
+    pin eza        $GH/eza-community/eza/releases/download/v0.23.5/eza_x86_64-unknown-linux-gnu.tar.gz 35c70c5c43c29108075e58b893234c67ef585f0b53a7eaf8e9e7d4eec9f339b4
+    pin fastfetch  $GH/fastfetch-cli/fastfetch/releases/download/2.71.0/fastfetch-linux-amd64.tar.gz abf5c99a3702cce8d3c7fa2cccd3ac205076ae0f2e45bced24a42a68821702d6
+    pin lazygit    $GH/jesseduffield/lazygit/releases/download/v0.66.3/lazygit_0.66.3_linux_x86_64.tar.gz 0a23f429a95f0d09db298b3c291536d818de066aa5a85c255806f0490ff6656b
+    pin lazydocker $GH/jesseduffield/lazydocker/releases/download/v0.25.2/lazydocker_0.25.2_Linux_x86_64.tar.gz 0d9dbfc26068b218e7ed84b104748cadc6e3cf733c0afd35465306fb39b9523c
+    pin nvim       $GH/neovim/neovim/releases/download/v0.12.6/nvim-linux-x86_64.tar.gz 474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87
+    pin treesitter $GH/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-linux-x64.gz 7ed56d152c52437397b9fcaa43cf341f49933cecc1ca291843f0d347c6e2cb3a
+    ;;
+  aarch64|arm64)
+    pin starship   $GH/starship/starship/releases/download/v1.27.0/starship-aarch64-unknown-linux-musl.tar.gz 341f5cbf24699fa0b27ec88965ad25f862ea09e15d35a543fd6ffdff1d2aa00d
+    pin zoxide     $GH/ajeetdsouza/zoxide/releases/download/v0.10.0/zoxide-0.10.0-aarch64-unknown-linux-musl.tar.gz f1f16c5d6298d63dee467eedea1cdcd8490e43e493bea43acd416dc9033ef641
+    pin eza        $GH/eza-community/eza/releases/download/v0.23.5/eza_aarch64-unknown-linux-gnu.tar.gz 40b87ae8628aa2ff0f0d2dc24ab52f689631366385c3da630bae745671fd71ec
+    pin fastfetch  $GH/fastfetch-cli/fastfetch/releases/download/2.71.0/fastfetch-linux-aarch64.tar.gz 458248f2b3abab9c5e0a5b9df12cdcd1a966b355ddd5f3244a5eb47d17d33412
+    pin lazygit    $GH/jesseduffield/lazygit/releases/download/v0.66.3/lazygit_0.66.3_linux_arm64.tar.gz ac0b48237f3d0283813e7154ec063237e519532feb0470c0881a1793ee78fd42
+    pin lazydocker $GH/jesseduffield/lazydocker/releases/download/v0.25.2/lazydocker_0.25.2_Linux_arm64.tar.gz 005c38b685aaa557e7d646d83a3dadb5024340eeed8c6a2e1949eee6f530de23
+    pin nvim       $GH/neovim/neovim/releases/download/v0.12.6/nvim-linux-arm64.tar.gz 8f1f64a0bdb97247034038c3823c6cbad5bdf9ecd5751b85494b71c3ee04c815
+    pin treesitter $GH/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-linux-arm64.gz 34fcc5c4fa7bdd2058a2a45a03b6eb9a49b03a93b6d52ec750f99b1516d98d33
+    ;;
   *) echo "Unsupported CPU: $(uname -m)"; exit 1 ;;
 esac
+pin font $GH/ryanoasis/nerd-fonts/releases/download/v3.5.1/CascadiaMono.zip de0cf0969685720f958788400cce5a065d6bb49ff1f865c964341a604b01cbd8
+LAZYVIM_STARTER_COMMIT=803bc181d7c0d6d5eeba9274d9be49b287294d99
 
-# URL of the newest GitHub release asset whose name matches a regex
-gh_asset() {
-  curl -fsSL "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
-    | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 \
-    | grep -iE "$2" | head -n1 || true
+# Download a pinned file over HTTPS and verify its SHA-256, or stop
+fetch() {  # <pin-name> <output-file>
+  curl --proto '=https' --tlsv1.2 -fsSL "${URL[$1]}" -o "$2"
+  local got; got="$(sha256sum "$2" | cut -d' ' -f1)"
+  if [ "$got" != "${SHA[$1]}" ]; then
+    rm -f "$2"
+    printf '\n\033[1;31mSECURITY: checksum mismatch for %s, refusing to install.\033[0m\n  expected %s\n  got      %s\n' "$1" "${SHA[$1]}" "$got" >&2
+    exit 1
+  fi
 }
-# Download a .tar.gz and copy one binary from it into ~/.local/bin
-install_from_tar() {  # <url> <binary-name>
+# Install one binary from a pinned .tar.gz into ~/.local/bin
+install_pinned() {  # <pin-name> <binary-name>
+  if have "$2"; then info "$2 (already installed)"; return; fi
   local tmp f; tmp="$(mktemp -d)"
-  curl -fsSL "$1" -o "$tmp/pkg.tar.gz"
+  fetch "$1" "$tmp/pkg.tar.gz"
   tar -xzf "$tmp/pkg.tar.gz" -C "$tmp"
-  f="$(find "$tmp" -type f -name "$2" | head -n1)"
+  # prefer .../bin/<name> (some archives also ship a completion script with the same name)
+  f="$(find "$tmp" -type f -path "*/bin/$2" | head -n1)"
+  [ -n "$f" ] || f="$(find "$tmp" -maxdepth 2 -type f -name "$2" | head -n1)"
+  [ -n "$f" ] || { warn "could not find $2 inside its download"; rm -rf "$tmp"; return; }
   install -m 755 "$f" "$BIN/$2"
   rm -rf "$tmp"
-}
-github_tool() {  # <binary> <repo> <asset-regex>
-  if have "$1"; then info "$1 (already installed)"; return; fi
-  local url; url="$(gh_asset "$2" "$3")"
-  if [ -z "$url" ]; then warn "could not find a download for $1"; return; fi
-  install_from_tar "$url" "$1" && info "$1 installed from GitHub"
+  info "$2 installed (checksum verified)"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -81,19 +115,20 @@ fi
 
 # ─────────────────────────────────────────────────────────────
 step "Installing tools missing from the package manager"
-if ! have starship; then
-  curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "$BIN" >/dev/null && info "starship installed"
-else info "starship (already installed)"; fi
+install_pinned starship starship
 
-# zoxide from its installer (distro versions are often too old for `--cmd cd`)
-if ! have zoxide || ! zoxide init --cmd cd bash >/dev/null 2>&1; then
-  curl -fsSL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh >/dev/null && info "zoxide installed"
-else info "zoxide (already installed)"; fi
+# zoxide: distro versions are often too old for `--cmd cd`, so replace those
+if have zoxide && ! zoxide init --cmd cd bash >/dev/null 2>&1; then
+  tmp="$(mktemp -d)"; fetch zoxide "$tmp/z.tar.gz"; tar -xzf "$tmp/z.tar.gz" -C "$tmp"
+  install -m 755 "$tmp/zoxide" "$BIN/zoxide"; rm -rf "$tmp"; info "zoxide updated (checksum verified)"
+else
+  install_pinned zoxide zoxide
+fi
 
-github_tool eza        eza-community/eza       "eza_${ARCH_RE}-unknown-linux-gnu\.tar\.gz$"
-github_tool fastfetch  fastfetch-cli/fastfetch "fastfetch-linux-${ARCH_RE}\.tar\.gz$"
-github_tool lazygit    jesseduffield/lazygit    "lazygit_[^/]*_linux_${ARCH_RE}\.tar\.gz$"
-github_tool lazydocker jesseduffield/lazydocker "lazydocker_[^/]*_linux_${ARCH_RE}\.tar\.gz$"
+install_pinned eza        eza
+install_pinned fastfetch  fastfetch
+install_pinned lazygit    lazygit
+install_pinned lazydocker lazydocker
 
 # Neovim: LazyVim needs 0.11.2 or newer (distro packages are often older)
 nvim_ok() {
@@ -103,19 +138,18 @@ nvim_ok() {
   [ "$maj" -gt 0 ] || [ "$min" -gt 11 ] || { [ "$min" -eq 11 ] && [ "$pat" -ge 2 ]; }
 }
 if nvim_ok; then info "neovim (already installed)"; else
-  url="$(gh_asset neovim/neovim "nvim-linux-${ARCH_RE}\.tar\.gz$")"
+  tmp="$(mktemp -d)"; fetch nvim "$tmp/nvim.tar.gz"
   rm -rf "$HOME/.local/opt/nvim"; mkdir -p "$HOME/.local/opt/nvim"
-  curl -fsSL "$url" | tar -xz -C "$HOME/.local/opt/nvim" --strip-components=1
+  tar -xzf "$tmp/nvim.tar.gz" -C "$HOME/.local/opt/nvim" --strip-components=1; rm -rf "$tmp"
   ln -sf "$HOME/.local/opt/nvim/bin/nvim" "$BIN/nvim"
-  info "neovim installed from GitHub"
+  info "neovim installed (checksum verified)"
 fi
 
 # tree-sitter CLI (LazyVim uses it to build syntax highlighting)
 if have tree-sitter; then info "tree-sitter (already installed)"; else
-  url="$(gh_asset tree-sitter/tree-sitter "tree-sitter-linux-${ARCH_RE}\.gz$")"
-  if [ -n "$url" ]; then
-    curl -fsSL "$url" | gunzip > "$BIN/tree-sitter" && chmod +x "$BIN/tree-sitter" && info "tree-sitter installed"
-  else warn "could not find tree-sitter download"; fi
+  tmp="$(mktemp -d)"; fetch treesitter "$tmp/ts.gz"
+  gunzip -c "$tmp/ts.gz" > "$BIN/tree-sitter"; chmod +x "$BIN/tree-sitter"; rm -rf "$tmp"
+  info "tree-sitter installed (checksum verified)"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -123,7 +157,7 @@ step "Installing CaskaydiaMono Nerd Font"
 if fc-list 2>/dev/null | grep -qi "CaskaydiaMono Nerd"; then info "already installed"; else
   FONT_DIR="$HOME/.local/share/fonts/CaskaydiaMono"; mkdir -p "$FONT_DIR"
   tmp="$(mktemp -d)"
-  curl -fsSL https://github.com/ryanoasis/nerd-fonts/releases/latest/download/CascadiaMono.zip -o "$tmp/font.zip"
+  fetch font "$tmp/font.zip"
   unzip -oq "$tmp/font.zip" 'CaskaydiaMonoNerdFont-*.ttf' -d "$FONT_DIR"
   rm -rf "$tmp"; fc-cache -f >/dev/null
   info "installed"
@@ -385,9 +419,49 @@ else
   for d in "$NVIM_DIR" "$HOME/.local/share/nvim" "$HOME/.local/state/nvim" "$HOME/.cache/nvim"; do
     [ -e "$d" ] && mv "$d" "$d.bak-$stamp" && info "backed up $d"
   done
-  git clone --depth 1 -q https://github.com/LazyVim/starter "$NVIM_DIR"
+  # pinned starter commit (git verifies the content matches the commit hash)
+  git init -q "$NVIM_DIR"
+  git -C "$NVIM_DIR" fetch -q --depth 1 https://github.com/LazyVim/starter "$LAZYVIM_STARTER_COMMIT"
+  git -C "$NVIM_DIR" checkout -q FETCH_HEAD
   rm -rf "$NVIM_DIR/.git"
-  info "LazyVim starter installed"
+  # pinned plugin versions (LazyVim installs exactly these commits)
+  cat > "$NVIM_DIR/lazy-lock.json" <<'EOF'
+{
+  "LazyVim": { "branch": "main", "commit": "999700997f72227187d49d8b92667183dc7fc809" },
+  "blink.cmp": { "branch": "main", "commit": "78336bc89ee5365633bcf754d93df01678b5c08f" },
+  "bufferline.nvim": { "branch": "main", "commit": "655133c3b4c3e5e05ec549b9f8cc2894ac6f51b3" },
+  "catppuccin": { "branch": "main", "commit": "edefef779ab08ce1a4a404713e3012b0d202bd35" },
+  "conform.nvim": { "branch": "master", "commit": "016802de402556da54c36bd7359b441266b01cdd" },
+  "flash.nvim": { "branch": "main", "commit": "5f0f270fdc7c5b0c21d903ee85b9cb06f2ac636a" },
+  "friendly-snippets": { "branch": "main", "commit": "b2ea5c41a150ba72fb656eedb4ed0a86d138d945" },
+  "gitsigns.nvim": { "branch": "main", "commit": "ef707fb93301a9b856f36eae4c8f56f5b988a794" },
+  "grug-far.nvim": { "branch": "main", "commit": "91b7e58b6ffc6ddad5acb7a7c1df21257724449e" },
+  "lazy.nvim": { "branch": "main", "commit": "85c7ff3711b730b4030d03144f6db6375044ae82" },
+  "lazydev.nvim": { "branch": "main", "commit": "ff2cbcba459b637ec3fd165a2be59b7bbaeedf0d" },
+  "lualine.nvim": { "branch": "master", "commit": "221ce6b2d999187044529f49da6554a92f740a96" },
+  "mason-lspconfig.nvim": { "branch": "main", "commit": "55eceab8975036ac43a4176cbfe0d4bf1ddae93f" },
+  "mason.nvim": { "branch": "main", "commit": "2a6940af80375532e5e9e7c1f2fc6319a1b7a69d" },
+  "mini.ai": { "branch": "main", "commit": "a4f5648dedf435e6306205135d1babb563b55d28" },
+  "mini.icons": { "branch": "main", "commit": "eab3e692d796d78ea6ffc978d8a380ff26fcf4e3" },
+  "mini.pairs": { "branch": "main", "commit": "03eb1f0062a2cee5314d1ac3939246e4bb21352e" },
+  "noice.nvim": { "branch": "main", "commit": "7bfd942445fb63089b59f97ca487d605e715f155" },
+  "nui.nvim": { "branch": "main", "commit": "10fc361835c856ba4233ef5ea135b919bf3dce97" },
+  "nvim-lint": { "branch": "master", "commit": "52107ce2076a27a285af781248e2c59bad817cd0" },
+  "nvim-lspconfig": { "branch": "master", "commit": "993d048db0d83d8e8ba3f9cb376456321acdcce3" },
+  "nvim-treesitter": { "branch": "main", "commit": "19bdfc04f40ed2ccb3340591d125f759b0406875" },
+  "nvim-treesitter-textobjects": { "branch": "main", "commit": "5c7b0263797dfd1bd6202f2b219f3b53a80b2187" },
+  "nvim-ts-autotag": { "branch": "main", "commit": "d7220b55e16ed3c04e88086256def5d282429493" },
+  "persistence.nvim": { "branch": "main", "commit": "b20b2a7887bd39c1a356980b45e03250f3dce49c" },
+  "plenary.nvim": { "branch": "master", "commit": "74b06c6c75e4eeb3108ec01852001636d85a932b" },
+  "snacks.nvim": { "branch": "main", "commit": "882c996cf28183f4d63640de0b4c02ec886d01f2" },
+  "todo-comments.nvim": { "branch": "main", "commit": "31e3c38ce9b29781e4422fc0322eb0a21f4e8668" },
+  "tokyonight.nvim": { "branch": "main", "commit": "cdc07ac78467a233fd62c493de29a17e0cf2b2b6" },
+  "trouble.nvim": { "branch": "main", "commit": "bd67efe408d4816e25e8491cc5ad4088e708a69a" },
+  "ts-comments.nvim": { "branch": "main", "commit": "a59d6092213447450191122c9346f309161504cb" },
+  "which-key.nvim": { "branch": "main", "commit": "3aab2147e74890957785941f0c1ad87d0a44c15a" }
+}
+EOF
+  info "LazyVim starter installed (pinned)"
 fi
 
 # Normal line numbers instead of relative ones
@@ -414,7 +488,7 @@ return {
 EOF
 
 info "downloading plugins (first run takes a minute)..."
-nvim --headless "+Lazy! sync" +qa >/dev/null 2>&1 || warn "plugin sync reported a problem; open nvim to finish"
+nvim --headless "+Lazy! restore" +qa >/dev/null 2>&1 || warn "plugin install reported a problem; open nvim to finish"
 info "plugins installed"
 
 # ─────────────────────────────────────────────────────────────

@@ -29,6 +29,40 @@ function Add-UserPath($dir) {
     }
 }
 
+# ─────────────────────────────────────────────────────────────
+#  Pinned downloads: exact versions + SHA-256 fingerprints.
+#  Every file is checked before it is used; a mismatch stops the script.
+#  Hashes were cross-checked against each project's own checksum files.
+#  To update: change the URL and hash (GitHub shows each file's sha256
+#  on the release page). Everything else comes from winget, which
+#  verifies each installer's hash itself.
+# ─────────────────────────────────────────────────────────────
+$Pins = @{
+    'treesitter-x64'   = @{ Url = 'https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-windows-x64.gz';   Sha = '230779ee4a729e3044d4a8ed57490b776ea1bac0671d12afbd6f5b4d1878f1d0' }
+    'treesitter-arm64' = @{ Url = 'https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-windows-arm64.gz'; Sha = '45be92c6537758f7c9a880f4598d45b435b6fa0b5a4ab5d48284b1e9b2225a11' }
+    'font'             = @{ Url = 'https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/CascadiaMono.zip';             Sha = 'de0cf0969685720f958788400cce5a065d6bb49ff1f865c964341a604b01cbd8' }
+}
+$LazyVimStarterCommit = '803bc181d7c0d6d5eeba9274d9be49b287294d99'
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Run a native program without Windows PowerShell treating its progress
+# messages (stderr) as fatal errors; fail only on a real non-zero exit code
+function Invoke-Native([scriptblock]$cmd, $what) {
+    $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { & $cmd 2>&1 | Out-Null } finally { $ErrorActionPreference = $old }
+    if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
+}
+# Download a pinned file over HTTPS and verify its SHA-256, or stop
+function Get-Pinned($name, $outFile) {
+    $pin = $Pins[$name]
+    Invoke-WebRequest $pin.Url -OutFile $outFile -UseBasicParsing
+    $got = (Get-FileHash $outFile -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $pin.Sha) {
+        Remove-Item $outFile -Force
+        throw "SECURITY: checksum mismatch for $name, refusing to install.`n  expected $($pin.Sha)`n  got      $got"
+    }
+}
+
 # Store apps (winget, pwsh) live here; it is sometimes missing from PATH
 $windowsApps = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
 Add-UserPath $windowsApps
@@ -47,10 +81,9 @@ $packages = @(
     'Neovim.Neovim', 'BurntSushi.ripgrep.MSVC', 'sharkdp.fd', 'zig.zig'
 )
 foreach ($id in $packages) {
-    & $winget list --id $id -e --disable-interactivity *> $null
-    if ($LASTEXITCODE -eq 0) { Info "$id (already installed)"; continue }
-    & $winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
-    if ($LASTEXITCODE -eq 0) { Info "$id installed" } else { Warn "$id failed (exit $LASTEXITCODE)" }
+    try { Invoke-Native { & $winget list --id $id -e --disable-interactivity } 'check'; Info "$id (already installed)"; continue } catch { }
+    try { Invoke-Native { & $winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity } $id; Info "$id installed" }
+    catch { Warn "$($_.Exception.Message)" }
 }
 Refresh-Path
 
@@ -65,17 +98,13 @@ if (Get-Command tree-sitter -ErrorAction SilentlyContinue) {
 } else {
     $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
     $gz = Join-Path $env:TEMP 'tree-sitter.gz'
-    try {
-        Invoke-WebRequest "https://github.com/tree-sitter/tree-sitter/releases/latest/download/tree-sitter-windows-$arch.gz" -OutFile $gz -UseBasicParsing
-        $in = [IO.File]::OpenRead($gz)
-        $out = [IO.File]::Create("$localBin\tree-sitter.exe")
-        $unzip = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
-        $unzip.CopyTo($out); $unzip.Dispose(); $out.Dispose(); $in.Dispose()
-        Info 'installed'
-    } catch {
-        if (Get-Command npm -ErrorAction SilentlyContinue) { npm install -g tree-sitter-cli | Out-Null; Info 'installed with npm' }
-        else { Warn "could not install tree-sitter: $($_.Exception.Message)" }
-    }
+    Get-Pinned "treesitter-$arch" $gz
+    $in = [IO.File]::OpenRead($gz)
+    $out = [IO.File]::Create("$localBin\tree-sitter.exe")
+    $unzip = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+    $unzip.CopyTo($out); $unzip.Dispose(); $out.Dispose(); $in.Dispose()
+    Remove-Item $gz -Force
+    Info 'installed (checksum verified)'
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -88,7 +117,7 @@ if ($hasFont) {
 } else {
     $tmp = Join-Path $env:TEMP 'nf-caskaydia'
     New-Item -ItemType Directory -Force $tmp | Out-Null
-    Invoke-WebRequest 'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/CascadiaMono.zip' -OutFile "$tmp\font.zip" -UseBasicParsing
+    Get-Pinned 'font' "$tmp\font.zip"
     Expand-Archive "$tmp\font.zip" "$tmp\x" -Force
     $fontDir = "$env:LOCALAPPDATA\Microsoft\Windows\Fonts"
     New-Item -ItemType Directory -Force $fontDir | Out-Null
@@ -343,9 +372,49 @@ if (-not $isLazyVim) {
     foreach ($d in $nvimDir, "$env:LOCALAPPDATA\nvim-data") {
         if (Test-Path $d) { Move-Item $d "$d.bak-$stamp"; Info "backed up $d -> $d.bak-$stamp" }
     }
-    git clone --depth 1 https://github.com/LazyVim/starter $nvimDir 2>&1 | Out-Null
+    # pinned starter commit (git verifies the content matches the commit hash)
+    Invoke-Native { git init -q $nvimDir } 'git init'
+    Invoke-Native { git -C $nvimDir fetch -q --depth 1 https://github.com/LazyVim/starter $LazyVimStarterCommit } 'downloading LazyVim'
+    Invoke-Native { git -C $nvimDir checkout -q FETCH_HEAD } 'git checkout'
     Remove-Item "$nvimDir\.git" -Recurse -Force -ErrorAction SilentlyContinue
-    Info 'LazyVim starter installed'
+    # pinned plugin versions (LazyVim installs exactly these commits)
+    Write-Utf8NoBom "$nvimDir\lazy-lock.json" @'
+{
+  "LazyVim": { "branch": "main", "commit": "999700997f72227187d49d8b92667183dc7fc809" },
+  "blink.cmp": { "branch": "main", "commit": "78336bc89ee5365633bcf754d93df01678b5c08f" },
+  "bufferline.nvim": { "branch": "main", "commit": "655133c3b4c3e5e05ec549b9f8cc2894ac6f51b3" },
+  "catppuccin": { "branch": "main", "commit": "edefef779ab08ce1a4a404713e3012b0d202bd35" },
+  "conform.nvim": { "branch": "master", "commit": "016802de402556da54c36bd7359b441266b01cdd" },
+  "flash.nvim": { "branch": "main", "commit": "5f0f270fdc7c5b0c21d903ee85b9cb06f2ac636a" },
+  "friendly-snippets": { "branch": "main", "commit": "b2ea5c41a150ba72fb656eedb4ed0a86d138d945" },
+  "gitsigns.nvim": { "branch": "main", "commit": "ef707fb93301a9b856f36eae4c8f56f5b988a794" },
+  "grug-far.nvim": { "branch": "main", "commit": "91b7e58b6ffc6ddad5acb7a7c1df21257724449e" },
+  "lazy.nvim": { "branch": "main", "commit": "85c7ff3711b730b4030d03144f6db6375044ae82" },
+  "lazydev.nvim": { "branch": "main", "commit": "ff2cbcba459b637ec3fd165a2be59b7bbaeedf0d" },
+  "lualine.nvim": { "branch": "master", "commit": "221ce6b2d999187044529f49da6554a92f740a96" },
+  "mason-lspconfig.nvim": { "branch": "main", "commit": "55eceab8975036ac43a4176cbfe0d4bf1ddae93f" },
+  "mason.nvim": { "branch": "main", "commit": "2a6940af80375532e5e9e7c1f2fc6319a1b7a69d" },
+  "mini.ai": { "branch": "main", "commit": "a4f5648dedf435e6306205135d1babb563b55d28" },
+  "mini.icons": { "branch": "main", "commit": "eab3e692d796d78ea6ffc978d8a380ff26fcf4e3" },
+  "mini.pairs": { "branch": "main", "commit": "03eb1f0062a2cee5314d1ac3939246e4bb21352e" },
+  "noice.nvim": { "branch": "main", "commit": "7bfd942445fb63089b59f97ca487d605e715f155" },
+  "nui.nvim": { "branch": "main", "commit": "10fc361835c856ba4233ef5ea135b919bf3dce97" },
+  "nvim-lint": { "branch": "master", "commit": "52107ce2076a27a285af781248e2c59bad817cd0" },
+  "nvim-lspconfig": { "branch": "master", "commit": "993d048db0d83d8e8ba3f9cb376456321acdcce3" },
+  "nvim-treesitter": { "branch": "main", "commit": "19bdfc04f40ed2ccb3340591d125f759b0406875" },
+  "nvim-treesitter-textobjects": { "branch": "main", "commit": "5c7b0263797dfd1bd6202f2b219f3b53a80b2187" },
+  "nvim-ts-autotag": { "branch": "main", "commit": "d7220b55e16ed3c04e88086256def5d282429493" },
+  "persistence.nvim": { "branch": "main", "commit": "b20b2a7887bd39c1a356980b45e03250f3dce49c" },
+  "plenary.nvim": { "branch": "master", "commit": "74b06c6c75e4eeb3108ec01852001636d85a932b" },
+  "snacks.nvim": { "branch": "main", "commit": "882c996cf28183f4d63640de0b4c02ec886d01f2" },
+  "todo-comments.nvim": { "branch": "main", "commit": "31e3c38ce9b29781e4422fc0322eb0a21f4e8668" },
+  "tokyonight.nvim": { "branch": "main", "commit": "cdc07ac78467a233fd62c493de29a17e0cf2b2b6" },
+  "trouble.nvim": { "branch": "main", "commit": "bd67efe408d4816e25e8491cc5ad4088e708a69a" },
+  "ts-comments.nvim": { "branch": "main", "commit": "a59d6092213447450191122c9346f309161504cb" },
+  "which-key.nvim": { "branch": "main", "commit": "3aab2147e74890957785941f0c1ad87d0a44c15a" }
+}
+'@
+    Info 'LazyVim starter installed (pinned)'
 } else {
     Info 'LazyVim already installed, keeping your config'
 }
@@ -376,8 +445,8 @@ return {
 
 Info 'downloading plugins (first run takes a minute)...'
 Refresh-Path
-nvim --headless "+Lazy! sync" +qa 2>&1 | Out-Null
-Info 'plugins installed'
+try { Invoke-Native { nvim --headless "+Lazy! restore" +qa } 'plugin install'; Info 'plugins installed' }
+catch { Warn 'plugin install reported a problem; open nvim to finish' }
 
 # ─────────────────────────────────────────────────────────────
 Write-Host "`nAll done! Close every Windows Terminal window and open it again." -ForegroundColor Green
