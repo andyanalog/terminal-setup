@@ -5,11 +5,34 @@ Starship prompt, Linux-style commands, lazygit, lazydocker and LazyVim.
 
 ![Demo: fastfetch, ls/ll/lt, cat and grep, LazyVim and lazygit in a Tokyo Night terminal](demo.gif)
 
-| System | Run | Then |
-|---|---|---|
-| Windows | `powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1` | Reopen Windows Terminal |
-| Linux / WSL | `bash setup-linux.sh` | Open a new terminal |
-| macOS | `bash setup-macos.sh` | Open the Ghostty app |
+## Install
+
+One command, no cloning needed.
+
+**Linux / WSL**
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/andyanalog/terminal-setup/v1.0.0/setup-linux.sh)"
+```
+
+**macOS**
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/andyanalog/terminal-setup/v1.0.0/setup-macos.sh)"
+```
+
+**Windows** (in PowerShell)
+```powershell
+iwr -useb https://raw.githubusercontent.com/andyanalog/terminal-setup/v1.0.0/setup-windows.ps1 -OutFile "$env:TEMP\setup-windows.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\setup-windows.ps1"
+```
+
+Then: reopen Windows Terminal (Windows), open a new terminal (Linux), or open the Ghostty app (macOS).
+
+These commands point at the `v1.0.0` release, so the script you run never changes underneath you. Prefer to read it first? Open the link in your browser, or clone the repo and run it locally:
+
+| System | Run from the repo folder |
+|---|---|
+| Windows | `powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1` |
+| Linux / WSL | `bash setup-linux.sh` |
+| macOS | `bash setup-macos.sh` |
 
 All scripts are safe to run again. They skip what's installed and back up configs they replace (`.bak`).
 
