@@ -3,13 +3,18 @@
   ----------------------------------------
   Tokyo Night Windows Terminal, CaskaydiaMono Nerd Font, Starship prompt,
   Linux-style commands (ls, cat, grep, rm -rf...), eza/bat/fzf/zoxide,
-  lazygit, lazydocker and LazyVim.
+  lazygit, lazydocker, LazyVim, and the GlazeWM tiling window manager
+  with an Omarchy-style Zebar top bar.
 
   Run from any PowerShell window:
       powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1
 
+  Terminal only, no tiling window manager:
+      powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1 -SkipGlazeWM
+
   Safe to re-run: installed tools are skipped and settings are backed up.
 #>
+param([switch]$SkipGlazeWM)
 
 $ErrorActionPreference = 'Stop'
 function Step($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
@@ -80,6 +85,7 @@ $packages = @(
     'JesseDuffield.lazygit', 'JesseDuffield.Lazydocker',
     'Neovim.Neovim', 'BurntSushi.ripgrep.MSVC', 'sharkdp.fd', 'zig.zig'
 )
+if (-not $SkipGlazeWM) { $packages += 'glzr-io.glazewm', 'glzr-io.zebar' }
 foreach ($id in $packages) {
     try { Invoke-Native { & $winget list --id $id -e --disable-interactivity } 'check'; Info "$id (already installed)"; continue } catch { }
     try { Invoke-Native { & $winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity } $id; Info "$id installed" }
@@ -449,5 +455,454 @@ try { Invoke-Native { nvim --headless "+Lazy! restore" +qa } 'plugin install'; I
 catch { Warn 'plugin install reported a problem; open nvim to finish' }
 
 # ─────────────────────────────────────────────────────────────
+#  GlazeWM: tiling windows, gaps, borders and Omarchy's Super-key
+#  shortcuts. Zebar draws the top bar (Omarchy's Waybar).
+# ─────────────────────────────────────────────────────────────
+if ($SkipGlazeWM) {
+    Step 'Skipping GlazeWM (-SkipGlazeWM)'
+} else {
+Step 'Configuring GlazeWM tiling window manager (~\.glzr\glazewm\config.yaml)'
+$glazeConfig = @'
+# Omarchy-style GlazeWM config (Tokyo Night)
+# Super = the Windows key. Win+Shift+P pauses tiling, Win+Shift+R reloads this file.
+# Full command list: https://github.com/glzr-io/glazewm#all-commands
+
+general:
+  # Zebar draws the Omarchy-style top bar
+  startup_commands: ['shell-exec zebar']
+  shutdown_commands: ['shell-exec taskkill /IM zebar.exe /F']
+  config_reload_commands: []
+  focus_follows_cursor: false
+  toggle_workspace_on_refocus: false
+  cursor_jump:
+    enabled: true
+    trigger: 'monitor_focus'
+  hide_method: 'cloak'
+  show_all_in_taskbar: false
+
+# Omarchy: 5px around each window (10px between them), 10px to the screen edge.
+# The bar docks like the taskbar (Windows reserves its 26px), so top is 10px too.
+gaps:
+  scale_with_dpi: true
+  inner_gap: '10px'
+  outer_gap:
+    top: '10px'
+    right: '10px'
+    bottom: '10px'
+    left: '10px'
+
+# Borders and square corners need Windows 11
+window_effects:
+  focused_window:
+    border:
+      enabled: true
+      color: '#7aa2f7'
+    # Omarchy windows have no title bars. Set to true to hide them here too
+    # (some apps draw badly without one).
+    hide_title_bar:
+      enabled: false
+    corner_style:
+      enabled: true
+      style: 'square'
+    transparency:
+      enabled: false
+      opacity: '95%'
+  other_windows:
+    border:
+      enabled: true
+      color: '#414868'
+    hide_title_bar:
+      enabled: false
+    corner_style:
+      enabled: true
+      style: 'square'
+    transparency:
+      enabled: false
+      opacity: '95%'
+
+window_behavior:
+  initial_state: 'tiling'
+  state_defaults:
+    floating:
+      centered: true
+      shown_on_top: false
+    fullscreen:
+      # true: Win+F maximizes and the top bar stays visible. false: true fullscreen.
+      maximized: true
+      shown_on_top: false
+
+workspaces:
+  - name: '1'
+  - name: '2'
+  - name: '3'
+  - name: '4'
+  - name: '5'
+  - name: '6'
+  - name: '7'
+  - name: '8'
+  - name: '9'
+  - name: '10'
+    display_name: '0'
+
+window_rules:
+  - commands: ['ignore']
+    match:
+      - window_process: { equals: 'zebar' }
+      - window_title: { regex: '[Pp]icture.in.[Pp]icture' }
+        window_class: { regex: 'Chrome_WidgetWin_1|MozillaDialogClass' }
+      - window_process: { equals: 'PowerToys' }
+        window_class: { regex: 'HwndWrapper\[PowerToys\.PowerAccent.*?\]' }
+      - window_title: { equals: 'Command Palette' }
+        window_class: { equals: 'WinUIDesktopWin32WindowClass' }
+      - window_process: { equals: 'PowerToys' }
+        window_title: { regex: '.*? - Peek' }
+      - window_process: { equals: 'Lively' }
+        window_class: { regex: 'HwndWrapper' }
+      - window_process: { equals: 'EXCEL' }
+        window_class: { not_regex: 'XLMAIN' }
+      - window_process: { equals: 'WINWORD' }
+        window_class: { not_regex: 'OpusApp' }
+      - window_process: { equals: 'POWERPNT' }
+        window_class: { not_regex: 'PPTFrameClass' }
+
+keybindings:
+  # ── Apps (same keys as Omarchy) ──────────────────────────
+  # Tools go through `cmd /c`: Windows Terminal can't find programs on
+  # the user PATH (winget's Links folder) when given a bare name.
+  - commands: ['shell-exec wt']
+    bindings: ['lwin+enter']
+  - commands: ['shell-exec explorer']
+    bindings: ['lwin+shift+f']
+  - commands: ['shell-exec wt cmd /c nvim']
+    bindings: ['lwin+shift+n']
+  - commands: ['shell-exec wt cmd /c lazydocker']
+    bindings: ['lwin+shift+d']
+  - commands: ['shell-exec wt cmd /c btop']
+    bindings: ['lwin+ctrl+t']
+
+  # ── Windows ──────────────────────────────────────────────
+  - commands: ['close']
+    bindings: ['lwin+w']
+  - commands: ['toggle-floating --centered']
+    bindings: ['lwin+t']
+  - commands: ['toggle-fullscreen']
+    bindings: ['lwin+f']
+  - commands: ['toggle-tiling-direction']
+    bindings: ['lwin+j']
+
+  # Focus with Super + arrows, swap with Super + Shift + arrows
+  - commands: ['focus --direction left']
+    bindings: ['lwin+left']
+  - commands: ['focus --direction right']
+    bindings: ['lwin+right']
+  - commands: ['focus --direction up']
+    bindings: ['lwin+up']
+  - commands: ['focus --direction down']
+    bindings: ['lwin+down']
+  - commands: ['move --direction left']
+    bindings: ['lwin+shift+left']
+  - commands: ['move --direction right']
+    bindings: ['lwin+shift+right']
+  - commands: ['move --direction up']
+    bindings: ['lwin+shift+up']
+  - commands: ['move --direction down']
+    bindings: ['lwin+shift+down']
+
+  # Resize with Super + - / =  (add Shift for height)
+  - commands: ['resize --width -5%']
+    bindings: ['lwin+oem_minus']
+  - commands: ['resize --width +5%']
+    bindings: ['lwin+oem_plus']
+  - commands: ['resize --height -5%']
+    bindings: ['lwin+shift+oem_minus']
+  - commands: ['resize --height +5%']
+    bindings: ['lwin+shift+oem_plus']
+
+  # ── Workspaces ───────────────────────────────────────────
+  - commands: ['focus --next-active-workspace']
+    bindings: ['lwin+tab']
+  - commands: ['focus --prev-active-workspace']
+    bindings: ['lwin+shift+tab']
+  - commands: ['focus --recent-workspace']
+    bindings: ['lwin+ctrl+tab']
+
+  # Move the current workspace to another monitor
+  - commands: ['move-workspace --direction left']
+    bindings: ['lwin+shift+alt+left']
+  - commands: ['move-workspace --direction right']
+    bindings: ['lwin+shift+alt+right']
+  - commands: ['move-workspace --direction up']
+    bindings: ['lwin+shift+alt+up']
+  - commands: ['move-workspace --direction down']
+    bindings: ['lwin+shift+alt+down']
+
+  # Super + 1-9/0: go to workspace
+  # Super + Shift + 1-9/0: move window there and follow it
+  # Super + Shift + Alt + 1-9/0: move window there silently
+  - { commands: ['focus --workspace 1'],  bindings: ['lwin+1'] }
+  - { commands: ['focus --workspace 2'],  bindings: ['lwin+2'] }
+  - { commands: ['focus --workspace 3'],  bindings: ['lwin+3'] }
+  - { commands: ['focus --workspace 4'],  bindings: ['lwin+4'] }
+  - { commands: ['focus --workspace 5'],  bindings: ['lwin+5'] }
+  - { commands: ['focus --workspace 6'],  bindings: ['lwin+6'] }
+  - { commands: ['focus --workspace 7'],  bindings: ['lwin+7'] }
+  - { commands: ['focus --workspace 8'],  bindings: ['lwin+8'] }
+  - { commands: ['focus --workspace 9'],  bindings: ['lwin+9'] }
+  - { commands: ['focus --workspace 10'], bindings: ['lwin+0'] }
+  - { commands: ['move --workspace 1', 'focus --workspace 1'],   bindings: ['lwin+shift+1'] }
+  - { commands: ['move --workspace 2', 'focus --workspace 2'],   bindings: ['lwin+shift+2'] }
+  - { commands: ['move --workspace 3', 'focus --workspace 3'],   bindings: ['lwin+shift+3'] }
+  - { commands: ['move --workspace 4', 'focus --workspace 4'],   bindings: ['lwin+shift+4'] }
+  - { commands: ['move --workspace 5', 'focus --workspace 5'],   bindings: ['lwin+shift+5'] }
+  - { commands: ['move --workspace 6', 'focus --workspace 6'],   bindings: ['lwin+shift+6'] }
+  - { commands: ['move --workspace 7', 'focus --workspace 7'],   bindings: ['lwin+shift+7'] }
+  - { commands: ['move --workspace 8', 'focus --workspace 8'],   bindings: ['lwin+shift+8'] }
+  - { commands: ['move --workspace 9', 'focus --workspace 9'],   bindings: ['lwin+shift+9'] }
+  - { commands: ['move --workspace 10', 'focus --workspace 10'], bindings: ['lwin+shift+0'] }
+  - { commands: ['move --workspace 1'],  bindings: ['lwin+shift+alt+1'] }
+  - { commands: ['move --workspace 2'],  bindings: ['lwin+shift+alt+2'] }
+  - { commands: ['move --workspace 3'],  bindings: ['lwin+shift+alt+3'] }
+  - { commands: ['move --workspace 4'],  bindings: ['lwin+shift+alt+4'] }
+  - { commands: ['move --workspace 5'],  bindings: ['lwin+shift+alt+5'] }
+  - { commands: ['move --workspace 6'],  bindings: ['lwin+shift+alt+6'] }
+  - { commands: ['move --workspace 7'],  bindings: ['lwin+shift+alt+7'] }
+  - { commands: ['move --workspace 8'],  bindings: ['lwin+shift+alt+8'] }
+  - { commands: ['move --workspace 9'],  bindings: ['lwin+shift+alt+9'] }
+  - { commands: ['move --workspace 10'], bindings: ['lwin+shift+alt+0'] }
+
+  # ── GlazeWM itself (not in Omarchy) ──────────────────────
+  # Pause tiling and all these shortcuts (games, presentations). Press again to resume.
+  - commands: ['wm-toggle-pause']
+    bindings: ['lwin+shift+p']
+  - commands: ['wm-reload-config']
+    bindings: ['lwin+shift+r']
+  - commands: ['wm-exit']
+    bindings: ['lwin+shift+escape']
+'@
+$glazePath = "$env:USERPROFILE\.glzr\glazewm\config.yaml"
+if (Test-Path $glazePath) { Copy-Item $glazePath "$glazePath.bak" -Force }
+Write-Utf8NoBom $glazePath $glazeConfig
+
+Step 'Writing Omarchy-style top bar for Zebar (~\.glzr\zebar\omarchy-style)'
+# A self-contained widget: no downloaded scripts or fonts. It talks to GlazeWM
+# over its local IPC socket (ws://127.0.0.1:6123) and uses the Nerd Font installed above.
+$zebarDir = "$env:USERPROFILE\.glzr\zebar"
+$zpack = @'
+{
+  "$schema": "https://github.com/glzr-io/zebar/raw/v3.0.0/resources/zpack-schema.json",
+  "name": "omarchy-style",
+  "version": "1.0.0",
+  "description": "Omarchy-style Tokyo Night top bar for GlazeWM.",
+  "tags": ["topbar"],
+  "previewImages": [],
+  "repositoryUrl": "https://github.com/andyanalog/terminal-setup",
+  "widgets": [
+    {
+      "name": "bar",
+      "htmlPath": "./bar.html",
+      "zOrder": "normal",
+      "shownInTaskbar": false,
+      "focused": false,
+      "resizable": false,
+      "transparent": true,
+      "includeFiles": ["*.html"],
+      "caching": { "defaultDuration": 0, "rules": [] },
+      "privileges": { "shellCommands": [] },
+      "presets": [
+        {
+          "name": "default",
+          "anchor": "top_left",
+          "offsetX": "0px",
+          "offsetY": "0px",
+          "width": "100%",
+          "height": "26px",
+          "monitorSelection": { "type": "all" },
+          "dockToEdge": { "enabled": true, "edge": "top", "windowMargin": "0px" }
+        }
+      ]
+    }
+  ]
+}
+'@
+$barHtml = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { --bg: #1a1b26; --fg: #a9b1d6; --red: #f7768e; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: 'CaskaydiaMono Nerd Font', 'CaskaydiaMono NF', monospace; font-size: 12px;
+    user-select: none; cursor: default;
+  }
+  .bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; height: 100%; padding: 0 8px; }
+  .left, .right { display: flex; align-items: center; }
+  .right { justify-content: flex-end; }
+  button { all: unset; cursor: pointer; }
+  .ws { padding: 0 6px; margin: 0 1.5px; min-width: 9px; text-align: center; }
+  .ws.empty { opacity: .5; }
+  .mod { min-width: 12px; margin: 0 7.5px; text-align: center; }
+  .paused { color: var(--red); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="left">
+    <button class="mod" id="logo" title="Terminal (Super + Enter)">&#xF17A;</button>
+    <div id="workspaces"></div>
+  </div>
+  <button id="clock"></button>
+  <div class="right">
+    <button class="mod paused" id="paused" title="Tiling paused (Super + Shift + P)" hidden>PAUSED</button>
+    <button class="mod" id="cpu" title="Activity (btop)">&#xF035B;</button>
+    <span class="mod" id="battery" hidden></span>
+  </div>
+</div>
+<script>
+  // Workspaces 1-5 are always shown, like Omarchy. The active one becomes a dot.
+  const PERSISTENT = ['1', '2', '3', '4', '5'];
+  const ACTIVE = '\u{F14FB}';
+  const BATTERY = ['\u{F007A}','\u{F007B}','\u{F007C}','\u{F007D}','\u{F007E}','\u{F007F}','\u{F0080}','\u{F0081}','\u{F0082}','\u{F0079}'];
+  const CHARGING = ['\u{F089C}','\u{F0086}','\u{F0087}','\u{F0088}','\u{F089D}','\u{F0089}','\u{F089E}','\u{F008A}','\u{F008B}','\u{F0085}'];
+  const $ = id => document.getElementById(id);
+
+  let sock = null, monitors = [], queued = false;
+  const send = msg => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(msg); };
+  const run = cmd => send('command ' + cmd);
+
+  function connect() {
+    sock = new WebSocket('ws://127.0.0.1:6123');
+    sock.onopen = () => {
+      send('sub -e workspace_activated workspace_deactivated workspace_updated focus_changed ' +
+           'focused_container_moved window_managed window_unmanaged monitor_added monitor_removed ' +
+           'monitor_updated pause_changed');
+      send('query monitors');
+      send('query paused');
+    };
+    sock.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      if (msg.messageType === 'client_response') {
+        if (msg.clientMessage === 'query monitors' && msg.data) { monitors = msg.data.monitors; renderWorkspaces(); }
+        if (msg.clientMessage === 'query paused') $('paused').hidden = msg.data !== true;
+      } else if (msg.messageType === 'event_subscription' && msg.data) {
+        if (msg.data.eventType === 'pause_changed') $('paused').hidden = !msg.data.isPaused;
+        else if (!queued) { queued = true; setTimeout(() => { queued = false; send('query monitors'); }, 30); }
+      }
+    };
+    sock.onclose = () => { monitors = []; renderWorkspaces(); setTimeout(connect, 2000); };
+  }
+
+  // The monitor this bar sits on (GlazeWM reports physical pixels)
+  function myMonitor() {
+    const r = window.devicePixelRatio || 1;
+    const x = (window.screenX + window.innerWidth / 2) * r, y = (window.screenY + 1) * r;
+    const inside = monitors.find(m => x >= m.x && x < m.x + m.width && y >= m.y && y < m.y + m.height);
+    if (inside) return inside;
+    const dist = m => Math.hypot(m.x - window.screenX * r, m.y - window.screenY * r);
+    return monitors.slice().sort((a, b) => dist(a) - dist(b))[0];
+  }
+
+  function renderWorkspaces() {
+    const box = $('workspaces');
+    box.textContent = '';
+    if (!monitors.length) return;
+    const me = myMonitor();
+    const mine = me ? me.children : [];
+    const elsewhere = new Set(monitors.filter(m => m !== me).flatMap(m => m.children.map(w => w.name)));
+    const names = [...new Set([...PERSISTENT.filter(n => !elsewhere.has(n)), ...mine.map(w => w.name)])];
+    names.sort((a, b) => (parseInt(a, 10) || 99) - (parseInt(b, 10) || 99) || a.localeCompare(b));
+    for (const name of names) {
+      const ws = mine.find(w => w.name === name);
+      const btn = document.createElement('button');
+      btn.className = 'ws' + (!ws || !ws.children.length ? ' empty' : '');
+      btn.textContent = ws && ws.isDisplayed ? ACTIVE : ((ws && ws.displayName) || (name === '10' ? '0' : name));
+      btn.onclick = () => run('focus --workspace ' + name);
+      box.appendChild(btn);
+    }
+  }
+
+  // Clock: "Monday 14:32", click for "09 November W45 2026"
+  let altClock = false;
+  function isoWeek(d) {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+    return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7);
+  }
+  function tick() {
+    const d = new Date(), pad = n => String(n).padStart(2, '0');
+    $('clock').textContent = altClock
+      ? `${pad(d.getDate())} ${d.toLocaleDateString(undefined, { month: 'long' })} W${pad(isoWeek(d))} ${d.getFullYear()}`
+      : `${d.toLocaleDateString(undefined, { weekday: 'long' })} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  $('clock').onclick = () => { altClock = !altClock; tick(); };
+  setInterval(tick, 1000); tick();
+
+  $('logo').onclick = () => run('shell-exec wt');
+  $('cpu').onclick = () => run('shell-exec wt cmd /c btop');
+
+  // Battery (hidden on desktops: browsers report those as "full and charging")
+  if (navigator.getBattery) {
+    navigator.getBattery().then(b => {
+      const show = () => {
+        const el = $('battery'), pct = Math.round(b.level * 100);
+        const noBattery = b.charging && b.level === 1 && b.chargingTime === 0;
+        el.hidden = noBattery;
+        el.textContent = (b.charging ? CHARGING : BATTERY)[Math.min(9, Math.floor(b.level * 10))];
+        el.title = `${pct}%${b.charging ? ' (charging)' : ''}`;
+      };
+      ['levelchange', 'chargingchange', 'chargingtimechange'].forEach(ev => b.addEventListener(ev, show));
+      show();
+    }).catch(() => {});
+  }
+
+  connect();
+</script>
+</body>
+</html>
+'@
+$zebarSettings = @'
+{
+  "$schema": "https://github.com/glzr-io/zebar/raw/v3.3.1/resources/settings-schema.json",
+  "startupConfigs": [
+    { "pack": "omarchy-style", "widget": "bar", "preset": "default" }
+  ]
+}
+'@
+Write-Utf8NoBom "$zebarDir\omarchy-style\zpack.json" $zpack
+Write-Utf8NoBom "$zebarDir\omarchy-style\bar.html" $barHtml
+$zebarSettingsPath = "$zebarDir\settings.json"
+if (Test-Path $zebarSettingsPath) { Copy-Item $zebarSettingsPath "$zebarSettingsPath.bak" -Force }
+Write-Utf8NoBom $zebarSettingsPath $zebarSettings
+
+Step 'Starting GlazeWM (and at every sign-in)'
+Refresh-Path
+$glazeExe = "$env:ProgramFiles\glzr.io\GlazeWM\glazewm.exe"
+if (-not (Test-Path $glazeExe)) {
+    # the CLI on PATH lives in a cli\ folder next to the main app
+    $cli = (Get-Command glazewm -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if ($cli) { $glazeExe = Join-Path (Split-Path (Split-Path $cli)) 'glazewm.exe' }
+}
+if (Test-Path $glazeExe) {
+    # Same registry entry as GlazeWM's own tray option "Run on system startup"
+    Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'GlazeWM' -Value "`"$glazeExe`""
+    Info 'starts at sign-in (untick "Run on system startup" in its tray menu to stop that)'
+    if (Get-Process glazewm -ErrorAction SilentlyContinue) {
+        Info 'already running: press Win+Shift+R to load the new config'
+    } else {
+        Start-Process $glazeExe
+        Info 'started'
+    }
+} else {
+    Warn 'GlazeWM not found; install it with: winget install glzr-io.glazewm'
+}
+}
+
+# ─────────────────────────────────────────────────────────────
 Write-Host "`nAll done! Close every Windows Terminal window and open it again." -ForegroundColor Green
 Write-Host "Try: ls, ll, lt, cat, ff, n (LazyVim), lg (lazygit), lzd (lazydocker), btop, fastfetch" -ForegroundColor DarkGray
+if (-not $SkipGlazeWM) {
+    Write-Host "Windows now tile like Omarchy: Win+Enter terminal, Win+W close, Win+1..9 workspaces, Win+Shift+P pause." -ForegroundColor DarkGray
+}
